@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>路由诊断 · 网络安全分析台</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --panel2: #273449; --line: #334155;
+    --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8;
+    --ok: #16a34a; --ok-bg: #052e16; --bad: #dc2626; --bad-bg: #2a0a0a;
+    --warn: #f59e0b; --warn-bg: #2b1d04; --loop: #a855f7; --loop-bg: #2a1042;
+    --err-bg: #3f1414; --err-line: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .topnav { display: flex; align-items: center; gap: 6px; padding: 10px 28px; background: #0b1220; border-bottom: 1px solid var(--line); }
+  .topnav .brand { font-weight: 700; margin-right: 18px; color: var(--accent); }
+  .topnav a { color: var(--muted); text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 13px; }
+  .topnav a:hover { color: var(--text); background: var(--panel2); }
+  .topnav a.active { color: #fff; background: #0369a1; }
+  header { padding: 20px 28px 12px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0 0 6px; font-size: 20px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  main { padding: 20px 28px 60px; max-width: 1500px; margin: 0 auto; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: #0369a1; border-color: #0ea5e9; color: #fff; }
+  button.primary:hover { background: #0284c7; color: #fff; }
+  .editor-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .editor-card h2 { margin: 0; padding: 10px 14px; font-size: 14px; background: var(--panel2); border-bottom: 1px solid var(--line); }
+  textarea {
+    width: 100%; min-height: 380px; resize: vertical; border: 0; outline: none;
+    background: #0b1220; color: #dbeafe; font: 12px/1.55 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    padding: 12px 14px;
+  }
+  .schema-help {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; margin: 16px 0; color: var(--muted); font-size: 12.5px;
+  }
+  .schema-help code { color: var(--accent); }
+  .schema-help pre {
+    background: #0b1220; border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; overflow-x: auto; color: #cbd5e1; margin: 8px 0 0;
+  }
+  #errors { display: none; margin: 16px 0; border: 1px solid var(--err-line); background: var(--err-bg); border-radius: 10px; padding: 12px 16px; }
+  #errors.show { display: block; }
+  #errors h3 { margin: 0 0 8px; color: #fca5a5; font-size: 14px; }
+  #errors ul { margin: 0; padding-left: 18px; }
+  #errors li { margin: 4px 0; }
+  .loc { color: var(--warn); font-weight: 600; }
+  #results { margin-top: 22px; }
+  .verdict { border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; font-size: 14px; border: 1px solid; }
+  .verdict.danger { background: var(--bad-bg); border-color: var(--bad); }
+  .verdict.safe { background: var(--ok-bg); border-color: var(--ok); }
+  .verdict.neutral { background: var(--panel); border-color: var(--line); color: var(--muted); }
+  .verdict .sub { font-size: 12.5px; margin-top: 4px; color: var(--muted); }
+  .summary-bar { display: flex; gap: 18px; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 18px; margin-bottom: 8px; font-size: 13px; }
+  .summary-bar b { color: var(--accent); }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .badge.oc-delivered-via-gateway { background: var(--ok-bg); color: #4ade80; border: 1px solid var(--ok); }
+  .badge.oc-delivered-bypass { background: var(--warn-bg); color: #fbbf24; border: 1px solid var(--warn); }
+  .badge.oc-dropped { background: #1f2937; color: #cbd5e1; border: 1px solid #64748b; }
+  .badge.oc-loop { background: var(--loop-bg); color: #d8b4fe; border: 1px solid var(--loop); }
+  .interval { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin: 14px 0; overflow: hidden; }
+  .iv-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 10px 16px; background: var(--panel2); border-bottom: 1px solid var(--line); }
+  .iv-title { font-size: 14px; font-weight: 600; }
+  .iv-title code { color: #bae6fd; }
+  .iv-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .iv-body { padding: 12px 16px; }
+  .wit { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--panel2); }
+  .wit-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .path { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; }
+  .hop { display: inline-flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; background: #0b1220; }
+  .hop.gw { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn) inset; }
+  .hop .rname { font-weight: 700; color: #bae6fd; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .hop .match { color: var(--muted); font-size: 11px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 0 5px; margin-left: 5px; vertical-align: middle; }
+  .tag.entry { background: #0369a1; color: #fff; }
+  .tag.gw { background: var(--warn); color: #1c1005; }
+  .arrow { color: var(--muted); font-size: 15px; }
+  .term { font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid; }
+  .term.ok { color: #4ade80; border-color: var(--ok); background: var(--ok-bg); }
+  .term.bad { color: #f87171; border-color: var(--bad); background: var(--bad-bg); }
+  .term.loop { color: #d8b4fe; border-color: var(--loop); background: var(--loop-bg); }
+  .cycle-box { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; border: 1.5px dashed var(--loop); border-radius: 10px; padding: 6px 8px 6px 8px; background: rgba(168, 85, 247, 0.08); position: relative; }
+  .cycle-label { position: absolute; top: -9px; left: 10px; background: var(--panel2); color: #d8b4fe; font-size: 10px; font-weight: 700; padding: 0 6px; border-radius: 4px; border: 1px solid var(--loop); }
+  .hint { color: var(--muted); font-size: 12px; }
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .footnote { color: var(--muted); font-size: 12px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<nav class="topnav">
+  <span class="brand">🛡 网络安全分析台</span>
+  <a href="/">规则差分</a>
+  <a href="/route-diag" class="active">路由诊断</a>
+</nav>
+
+<header>
+  <h1>隔离网路由诊断（最长前缀匹配 · 等价下一跳任选 · 全量可能结果）</h1>
+  <p>编辑 JSON 路由表并指定入口路由器、检查网关与目标 IPv4 CIDR。系统按前缀边界把目标网段符号化切分为互不重叠的地址闭区间，给出每个区间内全部可能结果（经网关送达 / 绕过网关送达 / 丢弃 / 无限循环）及示例目的 IP 与转发路径，不逐 IP 枚举、不抽样。</p>
+</header>
+
+<main>
+  <div class="toolbar">
+    <button class="primary" id="btn-analyze" type="button">开始诊断</button>
+    <button id="btn-ex-bypass" type="button">载入绕行示例</button>
+    <button id="btn-ex-loop" type="button">载入循环示例</button>
+    <button id="btn-clear" type="button">清空输入与结果</button>
+  </div>
+
+  <div class="editor-card">
+    <h2>路由配置 JSON（入口路由器 / 检查网关 / 目标网段 / 各路由器路由表）</h2>
+    <textarea id="config" spellcheck="false" placeholder="在此粘贴路由配置 JSON…"></textarea>
+  </div>
+
+  <div class="schema-help">
+    <strong>配置格式</strong>：一个 JSON 对象，字段
+    <code>entryRouter</code>（入口路由器编号，报文由此进入）、
+    <code>gatewayRouter</code>（检查网关编号，判定“经网关 / 绕网关”的基准）、
+    <code>targetCidr</code>（目标 IPv4 CIDR，须为网络地址，如 <code>10.0.0.0/24</code>）、
+    <code>routers</code>（路由器数组，<strong>1–8 台</strong>）。每台路由器：
+    <code>id</code>（整数，全网唯一）、<code>routes</code>（路由条目数组，<strong>≤ 20 条，表内 prefix 唯一</strong>）。每条路由：
+    <code>prefix</code>（严格 IPv4 CIDR）、<code>nextHops</code>（<strong>非空</strong>数组，元素为路由器编号、<code>"deliver"</code>（送达）或 <code>"drop"</code>（丢弃））。
+    每跳按<strong>最长前缀匹配</strong>选条目，无匹配即丢弃；命中条目的多个下一跳每次转发<strong>任选其一</strong>，诊断给出所有可能结果。
+    <pre>{
+  "entryRouter": 1,
+  "gatewayRouter": 3,
+  "targetCidr": "10.0.0.0/24",
+  "routers": [
+    {"id": 1, "routes": [
+      {"prefix": "10.0.0.0/25", "nextHops": [3]},
+      {"prefix": "10.0.0.128/25", "nextHops": [2, 3]}
+    ]},
+    {"id": 2, "routes": [
+      {"prefix": "10.0.0.128/25", "nextHops": ["deliver"]}
+    ]},
+    {"id": 3, "routes": [
+      {"prefix": "10.0.0.0/24", "nextHops": ["deliver"]}
+    ]}
+  ]
+}</pre>
+  </div>
+
+  <div id="errors" role="alert"></div>
+  <div id="results"></div>
+</main>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+
+const OUTCOME_META = {
+  "delivered-via-gateway": { label: "经网关送达" },
+  "delivered-bypass": { label: "绕过网关送达" },
+  "dropped": { label: "丢弃" },
+  "loop": { label: "无限循环" },
+};
+const OUTCOME_ORDER = ["delivered-via-gateway", "delivered-bypass", "dropped", "loop"];
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+
+function fmt(s) {  // 大整数按千分位展示（后端以字符串传递）
+  return String(s).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function showErrors(errors) {
+  // 输入无效：清除旧结果
+  $("results").innerHTML = "";
+  const box = $("errors");
+  const items = errors.map((e) => {
+    const parts = [];
+    if (e.routerId != null) parts.push(`路由器 R${e.routerId}`);
+    if (e.routeIndex != null) parts.push(`第 ${e.routeIndex} 条路由`);
+    if (e.field) parts.push(`字段 ${e.field}`);
+    if (e.line != null) parts.push(`JSON 第 ${e.line} 行第 ${e.col} 列`);
+    const loc = parts.length ? `<span class="loc">${escapeHtml(parts.join(" · "))}：</span>` : "";
+    return `<li>${loc}${escapeHtml(e.message)}</li>`;
+  }).join("");
+  box.innerHTML = `<h3>输入无效，未执行诊断（旧结果已清除），共 ${errors.length} 处问题：</h3><ul>${items}</ul>`;
+  box.classList.add("show");
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function clearErrors() {
+  const box = $("errors");
+  box.classList.remove("show");
+  box.innerHTML = "";
+}
+
+function hopHtml(h, index, gateway) {
+  const tags = [];
+  if (index === 0) tags.push('<span class="tag entry">入口</span>');
+  if (h.router === gateway) tags.push('<span class="tag gw">网关</span>');
+  const isGw = h.router === gateway;
+  const matched = h.matchedPrefix
+    ? `匹配 ${escapeHtml(h.matchedPrefix)}`
+    : "无匹配路由";
+  return `<span class="hop${isGw ? " gw" : ""}"><span><span class="rname">R${escapeHtml(h.router)}</span>${tags.join("")}</span><span class="match">${matched}</span></span>`;
+}
+
+function pathHtml(w, gateway) {
+  const parts = [];
+  const cs = w.cycleStart;
+  w.hops.forEach((h, i) => {
+    if (i > 0) parts.push('<span class="arrow">→</span>');
+    if (cs != null && i === cs) {
+      parts.push('<span class="cycle-box"><span class="cycle-label">重复段</span>');
+    }
+    parts.push(hopHtml(h, i, gateway));
+  });
+  if (cs != null) parts.push("</span>");
+  const last = w.hops[w.hops.length - 1];
+  parts.push('<span class="arrow">→</span>');
+  if (last.nextHop === "deliver") {
+    parts.push('<span class="term ok">送达 ✔</span>');
+  } else if (last.nextHop === "drop") {
+    const reason = last.dropReason === "no-matching-route" ? "（无匹配路由）" : "（路由指定 drop）";
+    parts.push(`<span class="term bad">丢弃 ✖${reason}</span>`);
+  } else {
+    parts.push(`<span class="term loop">↻ 回到 R${escapeHtml(last.nextHop)}，沿重复段无限循环</span>`);
+  }
+  return parts.join("");
+}
+
+function witnessHtml(w, gateway) {
+  const meta = OUTCOME_META[w.outcome];
+  const gwNote = w.passesGateway ? "路径经过检查网关" : "路径不经过检查网关";
+  return `<div class="wit">
+    <div class="wit-head">
+      <span class="badge oc-${w.outcome}">${meta.label}</span>
+      <span class="hint">示例目的 IP <code>${escapeHtml(w.ip)}</code> · ${gwNote}</span>
+    </div>
+    <div class="path">${pathHtml(w, gateway)}</div>
+  </div>`;
+}
+
+function intervalHtml(iv, gateway) {
+  const rg = iv.range;
+  const cidr = rg.cidr ? ` <span class="hint">（即 ${escapeHtml(rg.cidr)}）</span>` : "";
+  const badges = iv.outcomes
+    .map((o) => `<span class="badge oc-${o}">${OUTCOME_META[o].label}</span>`)
+    .join("");
+  const witnesses = iv.witnesses.map((w) => witnessHtml(w, gateway)).join("");
+  return `<div class="interval">
+    <div class="iv-head">
+      <span class="iv-title">#${iv.index}　<code>${escapeHtml(rg.start)}</code> – <code>${escapeHtml(rg.end)}</code>${cidr}</span>
+      <span class="hint">${fmt(rg.addressCount)} 个地址</span>
+      <span class="iv-badges">${badges}</span>
+    </div>
+    <div class="iv-body">${witnesses}</div>
+  </div>`;
+}
+
+function renderResults(data) {
+  clearErrors();
+  const r = data.result;
+  const s = r.summary;
+  const st = s.outcomeStats;
+
+  let verdict;
+  if (s.verdict === "bypass-possible") {
+    verdict = `<div class="verdict danger">⚠ <b>结论：存在绕过检查网关的送达路径。</b>
+      目标网段中有 <b>${fmt(st["delivered-bypass"].addresses)}</b> 个地址
+      （${st["delivered-bypass"].intervals} 个区间）可能<b>不经过检查网关 R${s.gatewayRouter}</b> 直接送达。
+      <div class="sub">调整路由后请重新诊断，确认该结果清零。</div></div>`;
+  } else if (s.verdict === "all-delivered-via-gateway") {
+    verdict = `<div class="verdict safe">✔ <b>结论：所有可能送达的流量都必经检查网关 R${s.gatewayRouter}。</b>
+      目标网段内不存在绕过网关送达的路径。</div>`;
+  } else {
+    verdict = `<div class="verdict neutral">目标网段内不存在任何可送达的路径（全部丢弃或循环）。</div>`;
+  }
+  if (s.loopFound) {
+    verdict += `<div class="verdict danger">↻ <b>另发现无限循环：</b>
+      ${fmt(st["loop"].addresses)} 个地址（${st["loop"].intervals} 个区间）的报文可能在网络中无限循环。</div>`;
+  }
+
+  const bar = `
+    <div class="summary-bar">
+      <span>入口路由器 <b>R${s.entryRouter}</b></span>
+      <span>检查网关 <b>R${s.gatewayRouter}</b></span>
+      <span>目标网段 <b>${escapeHtml(s.targetCidr)}</b>（${fmt(s.targetAddressCount)} 个地址）</span>
+      <span>路由器 <b>${s.routerCount}</b> 台 / 路由 <b>${s.routeCount}</b> 条</span>
+      <span>划分为 <b>${s.intervalCount}</b> 个互不重叠区间</span>
+    </div>
+    <div class="summary-bar">
+      ${OUTCOME_ORDER.map((o) =>
+        `<span><span class="badge oc-${o}">${OUTCOME_META[o].label}</span>
+         ${st[o].intervals} 个区间 / ${fmt(st[o].addresses)} 个地址</span>`).join("")}
+    </div>`;
+
+  const cards = r.intervals.map((iv) => intervalHtml(iv, s.gatewayRouter)).join("");
+
+  $("results").innerHTML = `
+    ${verdict}
+    ${bar}
+    ${cards}
+    <div class="footnote">划分完整性：以上 ${s.intervalCount} 个区间互不重叠，且并集恰好等于目标网段
+      ${escapeHtml(s.targetCidr)}；同一区间内任意目的 IP 的可能结果集合完全相同。
+      分析按全部路由前缀边界符号化切分（最长前缀匹配在区间内恒定），未逐 IP 枚举、未抽样。
+      每个结果给出的示例路径都是该区间内真实可行的转发路径；循环路径中虚线框为无限重复段。</div>`;
+}
+
+async function analyze() {
+  const btn = $("btn-analyze");
+  btn.disabled = true;
+  try {
+    const resp = await fetch("/api/route-diag/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: $("config").value }),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) {
+      showErrors(data.errors || [{ message: "未知错误" }]);
+      return;
+    }
+    renderResults(data);
+  } catch (err) {
+    showErrors([{ message: `请求失败：${err}` }]);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+let examplesCache = null;
+async function loadExample(kind) {
+  try {
+    if (!examplesCache) {
+      const resp = await fetch("/api/route-diag/examples");
+      examplesCache = await resp.json();
+    }
+    $("config").value = JSON.stringify(examplesCache[kind], null, 2);
+    clearErrors();
+    $("results").innerHTML = "";
+  } catch (err) {
+    showErrors([{ message: `示例加载失败：${err}` }]);
+  }
+}
+
+$("btn-analyze").addEventListener("click", analyze);
+$("btn-ex-bypass").addEventListener("click", () => loadExample("bypass"));
+$("btn-ex-loop").addEventListener("click", () => loadExample("loop"));
+$("btn-clear").addEventListener("click", () => {
+  $("config").value = "";
+  clearErrors();
+  $("results").innerHTML = "";
+});
+
+// 打开页面即载入绕行示例，便于直接演示
+loadExample("bypass");
+</script>
+</body>
+</html>
